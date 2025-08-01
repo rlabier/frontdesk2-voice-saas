@@ -1,103 +1,126 @@
-// API Route for Individual Property operations - Vercel/Supabase  
-// /app/api/properties/[unitId]/route.ts
+// VAPI Property Lookup API - Vercel/Supabase
+// /app/api/vapi/frontdesk/lookup/route.ts
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { updatePropertySchema } from '@/lib/vercel-property-schema';
-import { getUser } from '@/lib/auth';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-export async function GET(
-  request: NextRequest,
-  { params }: { params: { unitId: string } }
-) {
+const VALID_SQUAD_ID = "20bdbfcb-0fee-4ffe-bf30-a74424ccfa10";
+
+export async function POST(request: NextRequest) {
   try {
-    const user = await getUser();
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const body = await request.json();
+    const { UNITID, squadId } = body;
+
+    // Validate request
+    if (!UNITID) {
+      return NextResponse.json({ 
+        error: 'UNITID is required',
+        success: false 
+      }, { status: 400 });
     }
 
+    if (!squadId || squadId !== VALID_SQUAD_ID) {
+      return NextResponse.json({ 
+        error: 'Invalid or missing squadId',
+        success: false 
+      }, { status: 401 });
+    }
+
+    // Fetch property from database
     const { data: property, error } = await supabase
       .from('properties')
       .select('*')
-      .eq('UNITID', params.unitId)
-      .eq('user_id', user.id)
+      .eq('UNITID', UNITID.toUpperCase())
+      .eq('status', 'active')
       .single();
 
     if (error || !property) {
-      return NextResponse.json({ error: 'Property not found' }, { status: 404 });
+      return NextResponse.json({
+        error: `Property ${UNITID} not found or inactive`,
+        success: false
+      }, { status: 404 });
     }
 
-    return NextResponse.json(property);
-  } catch (error) {
-    console.error('Error in GET /api/properties/[unitId]:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
-  }
-}
-
-export async function PUT(
-  request: NextRequest,
-  { params }: { params: { unitId: string } }
-) {
-  try {
-    const user = await getUser();
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const body = await request.json();
-    const validatedData = updatePropertySchema.parse(body);
-
-    const { data: property, error } = await supabase
+    // Increment voice call counter
+    await supabase
       .from('properties')
-      .update({
-        ...validatedData,
-        updated_at: new Date().toISOString(),
+      .update({ 
+        voice_calls_this_week: (property.voice_calls_this_week || 0) + 1,
+        updated_at: new Date().toISOString()
       })
-      .eq('UNITID', params.unitId)
-      .eq('user_id', user.id)
-      .select()
-      .single();
+      .eq('UNITID', UNITID.toUpperCase());
 
-    if (error || !property) {
-      return NextResponse.json({ error: 'Property not found or failed to update' }, { status: 404 });
-    }
+    // Return formatted property data for VAPI
+    const response = {
+      success: true,
+      UNITID: property.UNITID,
+      propertyInfo: {
+        // Access & Security
+        lockCode: property.LOCKCODE,
+        lockBox: property.LOCKBOX,
+        lockInstructions: property.LOCKINFO,
+        gateCode: property.GATECODE,
+        gateInstructions: property.GATEINFO,
+        
+        // Network & Technology
+        wifiNetwork: property.NETWORKNAME,
+        wifiPassword: property.PASSCODE,
+        routerInfo: property.ROUTERINFO,
+        tvInfo: property.TVINFO,
+        noSignalHelp: property.NOSIG,
+        
+        // Amenities & Supplies
+        linenInfo: property.LINENINFO,
+        washclothPolicy: property.WASHCLOTHS,
+        packNPlayInfo: property.PACKNPLAY,
+        suppliesPolicy: property.EXSUPPLYINFO,
+        dishwasherInstructions: property.DISHWASHER,
+        coffeeMakerInfo: property.COFFEEMAKER,
+        
+        // Maintenance & Operations
+        garbageInfo: property.GARBAGEINFO,
+        jacuzziInstructions: property.JACUZZI,
+        poolHeatingInfo: property.POOLHEAT,
+        lostAndFoundPolicy: property.LOSTANDFOUND,
+        
+        // Community Access
+        communityPassLocation: property.PASSLOC,
+        parkingInfo: property.PARKING,
+        poolCode: property.POOLCODE,
+        communityPoolLocation: property.COMPOOLLOC,
+        clubhouseInfo: property.CLUBHOUSE,
+        
+        // Management & Contact
+        managerEmail: property.MANAGEREMAIL,
+        managerPhone: property.MANAGERTXT,
+        checkInTime: property.CHECKIN,
+        checkOutTime: property.CHECKOUT,
+        
+        // Policies
+        deliveryPolicy: property.DELIVERYINFO,
+        petPolicy: property.PET,
+        parkingPolicy: property.PARKINGINFO
+      },
+      metadata: {
+        status: property.status,
+        voiceCallsThisWeek: property.voice_calls_this_week + 1,
+        lastUpdated: property.updated_at,
+        squadId: squadId
+      }
+    };
 
-    return NextResponse.json(property);
+    return NextResponse.json(response);
+    
   } catch (error) {
-    console.error('Error in PUT /api/properties/[unitId]:', error);
-    return NextResponse.json({ error: 'Invalid request data' }, { status: 400 });
-  }
-}
-
-export async function DELETE(
-  request: NextRequest,
-  { params }: { params: { unitId: string } }
-) {
-  try {
-    const user = await getUser();
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const { error } = await supabase
-      .from('properties')
-      .delete()
-      .eq('UNITID', params.unitId)
-      .eq('user_id', user.id);
-
-    if (error) {
-      console.error('Error deleting property:', error);
-      return NextResponse.json({ error: 'Failed to delete property' }, { status: 500 });
-    }
-
-    return NextResponse.json({ message: 'Property deleted successfully' });
-  } catch (error) {
-    console.error('Error in DELETE /api/properties/[unitId]:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    console.error('Error in VAPI lookup:', error);
+    return NextResponse.json({
+      error: 'Internal server error during property lookup',
+      success: false
+    }, { status: 500 });
   }
 }
