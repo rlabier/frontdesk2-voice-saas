@@ -1,49 +1,32 @@
+// Next.js middleware for authentication
+// This runs before every request to check authentication status
+
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { signToken, verifyToken } from '@/lib/auth/session';
 
-const protectedRoutes = '/dashboard';
-
-export async function middleware(request: NextRequest) {
+export function middleware(request: NextRequest) {
+  // Define protected routes
+  const protectedRoutes = ['/dashboard', '/profile', '/settings'];
+  const authRoutes = ['/sign-in', '/sign-up'];
+  
   const { pathname } = request.nextUrl;
-  const sessionCookie = request.cookies.get('session');
-  const isProtectedRoute = pathname.startsWith(protectedRoutes);
+  const token = request.cookies.get('auth-token')?.value;
 
-  if (isProtectedRoute && !sessionCookie) {
+  // If accessing protected route without token, redirect to sign-in
+  if (protectedRoutes.some(route => pathname.startsWith(route)) && !token) {
     return NextResponse.redirect(new URL('/sign-in', request.url));
   }
 
-  let res = NextResponse.next();
-
-  if (sessionCookie && request.method === 'GET') {
-    try {
-      const parsed = await verifyToken(sessionCookie.value);
-      const expiresInOneDay = new Date(Date.now() + 24 * 60 * 60 * 1000);
-
-      res.cookies.set({
-        name: 'session',
-        value: await signToken({
-          ...parsed,
-          expires: expiresInOneDay.toISOString()
-        }),
-        httpOnly: true,
-        secure: true,
-        sameSite: 'lax',
-        expires: expiresInOneDay
-      });
-    } catch (error) {
-      console.error('Error updating session:', error);
-      res.cookies.delete('session');
-      if (isProtectedRoute) {
-        return NextResponse.redirect(new URL('/sign-in', request.url));
-      }
-    }
+  // If accessing auth route with token, redirect to dashboard
+  if (authRoutes.includes(pathname) && token) {
+    return NextResponse.redirect(new URL('/dashboard', request.url));
   }
 
-  return res;
+  return NextResponse.next();
 }
 
 export const config = {
-  matcher: ['/((?!api|_next/static|_next/image|favicon.ico).*)'],
-  runtime: 'nodejs'
+  matcher: [
+    '/((?!api|_next/static|_next/image|favicon.ico).*)',
+  ],
 };
